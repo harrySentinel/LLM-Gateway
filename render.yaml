@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: llm-gateway
+    runtime: python
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false          # set in Render dashboard, never committed
+      - key: GROQ_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false          # use port 6543 (transaction pooler) on Render
+      - key: ALLOWED_ORIGINS
+        sync: false          # e.g. https://your-dashboard.vercel.app
