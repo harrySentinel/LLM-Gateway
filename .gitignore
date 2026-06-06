@@ -5,6 +5,7 @@ __pycache__/
 *.db
 learning.md
 summary.md
+implementation.md
 err*.txt
 uvicorn_out.txt
 *.log
