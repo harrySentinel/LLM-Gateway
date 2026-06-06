@@ -1,10 +1,11 @@
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import and_, case, func, select, text as sa_text
+from sqlalchemy import and_, case, func, select
 
+from app.api.deps import require_user
 from app.db.engine import get_session
 from app.db.models import ApiKey, RequestLog
 
@@ -83,13 +84,16 @@ def _thirty_days_ago() -> date:
     return (_today() - timedelta(days=30))
 
 
-# AVG(CASE WHEN status='success' THEN 1.0 ELSE 0.0 END) = success / total as float.
-# COALESCE handles the case where the result set is empty (AVG of nothing = NULL).
 def _success_rate_expr():
     return func.coalesce(
         func.avg(case((RequestLog.status == "success", 1.0), else_=0.0)),
         0.0,
     )
+
+
+def _user_key_ids(user_id: str):
+    """Subquery: IDs of API keys owned by this user."""
+    return select(ApiKey.id).where(ApiKey.user_id == user_id).scalar_subquery()
 
 
 # ── GET /stats ────────────────────────────────────────────────────────────────
@@ -98,6 +102,7 @@ def _success_rate_expr():
 async def get_stats(
     from_date: Optional[date] = Query(default=None, description="Start date YYYY-MM-DD"),
     to_date:   Optional[date] = Query(default=None, description="End date YYYY-MM-DD"),
+    user_id: str = Depends(require_user),
 ):
     if from_date is None:
         from_date = _thirty_days_ago()
@@ -106,11 +111,15 @@ async def get_stats(
 
     from_dt = _start(from_date)
     to_dt   = _end(to_date)
-    time_filter = and_(RequestLog.timestamp >= from_dt, RequestLog.timestamp <= to_dt)
+    key_ids = _user_key_ids(user_id)
+    time_filter = and_(
+        RequestLog.timestamp >= from_dt,
+        RequestLog.timestamp <= to_dt,
+        RequestLog.api_key_id.in_(key_ids),
+    )
 
     async with get_session() as session:
 
-        # ── Overall totals (single query) ────────────────────────────────────
         totals_row = (await session.execute(
             select(
                 func.count().label("requests"),
@@ -120,8 +129,6 @@ async def get_stats(
             ).where(time_filter)
         )).mappings().one()
 
-        # ── Breakdown by provider ────────────────────────────────────────────
-        # GROUP BY is on a low-cardinality indexed column — fast even on large tables.
         provider_rows = (await session.execute(
             select(
                 RequestLog.provider,
@@ -135,7 +142,6 @@ async def get_stats(
             .order_by(func.count().desc())
         )).mappings().all()
 
-        # ── Breakdown by api_key (outer join for the human-readable name) ────
         api_key_rows = (await session.execute(
             select(
                 RequestLog.api_key_id,
@@ -195,15 +201,18 @@ async def get_logs(
     api_key_id: Optional[int] = None,
     page:       int = Query(default=1,  ge=1),
     page_size:  int = Query(default=50, ge=1, le=500),
+    user_id: str = Depends(require_user),
 ):
     if from_date is None:
         from_date = _thirty_days_ago()
     if to_date is None:
         to_date = _today()
 
+    key_ids = _user_key_ids(user_id)
     conditions = [
         RequestLog.timestamp >= _start(from_date),
         RequestLog.timestamp <= _end(to_date),
+        RequestLog.api_key_id.in_(key_ids),
     ]
     if provider:
         conditions.append(RequestLog.provider == provider)
@@ -217,13 +226,10 @@ async def get_logs(
 
     async with get_session() as session:
 
-        # ── Count total matching rows (same filters, no LIMIT) ───────────────
-        # Runs against the timestamp + filter indexes — does not full-scan.
         total = (await session.scalar(
             select(func.count()).select_from(RequestLog).where(where_clause)
         )) or 0
 
-        # ── Paginated data with api_key name via outer join ──────────────────
         rows = (await session.execute(
             select(
                 RequestLog.id,
@@ -283,12 +289,8 @@ class DailyStat(BaseModel):
 async def get_daily_stats(
     from_date: Optional[date] = Query(default=None),
     to_date:   Optional[date] = Query(default=None),
+    user_id: str = Depends(require_user),
 ):
-    """
-    Daily aggregates for time-series charts.
-    Uses date_trunc('day', ...) so each row represents one calendar day.
-    The timestamp index makes this fast even on large tables.
-    """
     if from_date is None:
         from_date = _thirty_days_ago()
     if to_date is None:
@@ -296,6 +298,7 @@ async def get_daily_stats(
 
     from_dt = _start(from_date)
     to_dt   = _end(to_date)
+    key_ids = _user_key_ids(user_id)
     day_col = func.date_trunc("day", RequestLog.timestamp)
 
     async with get_session() as session:
@@ -306,7 +309,11 @@ async def get_daily_stats(
                 func.coalesce(func.sum(RequestLog.cost_usd),   0.0).label("cost_usd"),
                 func.coalesce(func.avg(RequestLog.latency_ms), 0.0).label("avg_latency_ms"),
             )
-            .where(and_(RequestLog.timestamp >= from_dt, RequestLog.timestamp <= to_dt))
+            .where(and_(
+                RequestLog.timestamp >= from_dt,
+                RequestLog.timestamp <= to_dt,
+                RequestLog.api_key_id.in_(key_ids),
+            ))
             .group_by(day_col)
             .order_by(day_col)
         )).mappings().all()

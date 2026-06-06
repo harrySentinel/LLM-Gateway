@@ -85,6 +85,9 @@ async def create_tables() -> None:
             "ALTER TABLE request_logs "
             "ADD COLUMN IF NOT EXISTS fallback_used BOOLEAN NOT NULL DEFAULT FALSE"
         ))
+        await conn.execute(text(
+            "ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS user_id TEXT"
+        ))
 
         # Indexes — IF NOT EXISTS makes these safe to run on every startup.
         for ddl in [
@@ -102,6 +105,8 @@ async def create_tables() -> None:
 
             "CREATE INDEX IF NOT EXISTS ix_request_logs_api_key_timestamp "
             "ON request_logs (api_key_id, timestamp)",
+
+            "CREATE INDEX IF NOT EXISTS ix_api_keys_user_id ON api_keys (user_id)",
         ]:
             await conn.execute(text(ddl))
 

@@ -14,6 +14,7 @@ class ApiKey(Base):
     key_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    user_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
 
 
 class RequestLog(Base):

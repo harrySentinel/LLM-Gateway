@@ -1,9 +1,10 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy import select
 
+from app.api.deps import require_user
 from app.db.engine import get_session
 from app.db.models import ApiKey
 from app.services.auth import generate_key, hash_key
@@ -27,13 +28,14 @@ class CreateKeyResponse(KeyResponse):
 
 
 @keys_router.post("/keys", response_model=CreateKeyResponse, status_code=201)
-async def create_key(body: CreateKeyRequest):
+async def create_key(body: CreateKeyRequest, user_id: str = Depends(require_user)):
     token = generate_key()
     row = ApiKey(
         name=body.name,
         key_hash=hash_key(token),
         created_at=datetime.now(timezone.utc),
         is_active=True,
+        user_id=user_id,
     )
     async with get_session() as session:
         session.add(row)
@@ -49,10 +51,12 @@ async def create_key(body: CreateKeyRequest):
 
 
 @keys_router.get("/keys", response_model=list[KeyResponse])
-async def list_keys():
+async def list_keys(user_id: str = Depends(require_user)):
     async with get_session() as session:
         result = await session.execute(
-            select(ApiKey).order_by(ApiKey.created_at.desc())
+            select(ApiKey)
+            .where(ApiKey.user_id == user_id, ApiKey.is_active.is_(True))
+            .order_by(ApiKey.created_at.desc())
         )
         rows = result.scalars().all()
     return [
