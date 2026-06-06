@@ -4,6 +4,7 @@ __pycache__/
 .env
 *.db
 learning.md
+summary.md
 err*.txt
 uvicorn_out.txt
 *.log

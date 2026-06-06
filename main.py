@@ -13,15 +13,18 @@ from app.api.routes.keys import keys_router            # noqa: E402
 from app.db import engine as db_engine                 # noqa: E402
 from app.db import models as _models                   # noqa: F401,E402  registers tables with Base
 from app.services import http_client                   # noqa: E402
+from app.services import cache                         # noqa: E402
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     http_client.init()
+    cache.init()
     db_engine.init()
     await db_engine.create_tables()
     yield
     await http_client.close()
+    await cache.close()
     await db_engine.close()
 
 

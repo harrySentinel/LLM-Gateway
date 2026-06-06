@@ -5,6 +5,7 @@ from sqlalchemy import select
 
 from app.db.engine import get_session
 from app.db.models import ApiKey
+from app.services import cache
 from app.services.auth import hash_key
 from app.services.http_client import get
 
@@ -37,13 +38,19 @@ async def require_api_key(authorization: str = Header(...)) -> ApiKey:
 
 async def require_user(authorization: str = Header(...)) -> str:
     """
-    Validates the Supabase access token by calling /auth/v1/user.
-    Avoids local JWT verification — no secret needed, always authoritative.
+    Validates the Supabase access token. Results are cached in Redis (5 min TTL)
+    so repeated dashboard calls skip the Supabase round-trip entirely.
     """
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Authorization header must be: Bearer <token>")
 
     token = authorization[7:]
+
+    # Cache hit — skip the network call entirely
+    cached = await cache.get_user_id(token)
+    if cached:
+        return cached
+
     supabase_url = os.environ.get("SUPABASE_URL", "").strip()
     supabase_key = os.environ.get("SUPABASE_ANON_KEY", "").replace(" ", "").replace("\n", "")
 
@@ -68,4 +75,6 @@ async def require_user(authorization: str = Header(...)) -> str:
     if not user_id:
         raise HTTPException(status_code=401, detail="Token missing user ID")
 
+    # Cache the result so the next call is instant
+    await cache.set_user_id(token, user_id)
     return user_id
