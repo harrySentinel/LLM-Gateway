@@ -17,10 +17,13 @@ _FINISH_REASON_MAP = {
 }
 
 
-def _api_key() -> str:
-    key = os.environ.get("GEMINI_API_KEY")
+def _api_key(user_key: str | None = None) -> str:
+    key = user_key or os.environ.get("GEMINI_API_KEY", "")
     if not key:
-        raise HTTPException(status_code=500, detail="GEMINI_API_KEY is not set")
+        raise HTTPException(
+            status_code=400,
+            detail="Gemini API key not configured. Add it in Provider Keys.",
+        )
     return key
 
 
@@ -65,11 +68,11 @@ def _to_openai_response(gemini_resp: dict, model: str) -> dict:
     }
 
 
-async def chat_completion(model: str, messages: list[dict]) -> dict:
+async def chat_completion(model: str, messages: list[dict], user_key: str | None = None) -> dict:
     url = f"{GEMINI_BASE_URL}/models/{model}:generateContent"
     payload = _to_gemini_payload(messages)
     try:
-        resp = await http_client.get().post(url, params={"key": _api_key()}, json=payload)
+        resp = await http_client.get().post(url, params={"key": _api_key(user_key)}, json=payload)
     except httpx.TimeoutException:
         raise HTTPException(status_code=504, detail="Gemini API timed out")
     except httpx.RequestError as exc:
@@ -82,7 +85,7 @@ async def chat_completion(model: str, messages: list[dict]) -> dict:
     return _to_openai_response(resp.json(), model)
 
 
-async def stream_chat(model: str, messages: list[dict], usage_out: dict):
+async def stream_chat(model: str, messages: list[dict], usage_out: dict, user_key: str | None = None):
     """
     Async generator — yields OpenAI-format SSE bytes.
     Gemini's streamGenerateContent sends chunks in Gemini format; we convert
@@ -97,7 +100,7 @@ async def stream_chat(model: str, messages: list[dict], usage_out: dict):
 
     try:
         async with http_client.get().stream(
-            "POST", url, params={"key": _api_key(), "alt": "sse"}, json=payload
+            "POST", url, params={"key": _api_key(user_key), "alt": "sse"}, json=payload
         ) as resp:
             if resp.status_code != 200:
                 body = await resp.aread()

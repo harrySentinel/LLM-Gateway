@@ -7,9 +7,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()  # must run before any module reads os.environ
 
-from app.api.routes.chat import api_router            # noqa: E402
-from app.api.routes.dashboard import dashboard_router  # noqa: E402
-from app.api.routes.keys import keys_router            # noqa: E402
+from app.api.routes.chat import api_router                      # noqa: E402
+from app.api.routes.dashboard import dashboard_router           # noqa: E402
+from app.api.routes.keys import keys_router                     # noqa: E402
+from app.api.routes.provider_keys import provider_keys_router   # noqa: E402
 from app.db import engine as db_engine                 # noqa: E402
 from app.db import models as _models                   # noqa: F401,E402  registers tables with Base
 from app.services import http_client                   # noqa: E402
@@ -48,9 +49,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(api_router,       prefix="/v1")
-app.include_router(keys_router,      prefix="/v1")
-app.include_router(dashboard_router, prefix="/v1")
+app.include_router(api_router,           prefix="/v1")
+app.include_router(keys_router,          prefix="/v1")
+app.include_router(dashboard_router,     prefix="/v1")
+app.include_router(provider_keys_router, prefix="/v1")
 
 
 @app.get("/health")

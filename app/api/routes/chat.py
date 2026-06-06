@@ -6,6 +6,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.api.deps import require_api_key
+from app.api.routes.provider_keys import get_user_provider_keys
 from app.db.models import ApiKey
 from app.services import logger, router
 
@@ -27,18 +28,14 @@ async def _stream_and_log(
     model: str,
     messages: list[dict],
     api_key_id: int | None,
+    user_keys: dict,
 ):
-    """
-    Wraps router.stream_chat (which handles provider selection + failover).
-    meta_out is populated by the router before the first chunk is yielded,
-    so the finally block always reads the actual provider and fallback status.
-    """
     usage_out: dict = {}
-    meta_out: dict = {}
+    meta_out:  dict = {}
     t0 = time.monotonic()
     status = "error"
     try:
-        async for chunk in router.stream_chat(model, messages, usage_out, meta_out):
+        async for chunk in router.stream_chat(model, messages, usage_out, meta_out, user_keys=user_keys):
             yield chunk
         status = "success"
     finally:
@@ -63,24 +60,25 @@ async def chat(
     background_tasks: BackgroundTasks,
     api_key: ApiKey = Depends(require_api_key),
 ):
-    model = request.model
+    model    = request.model
     messages = [m.model_dump() for m in request.messages]
 
-    # ── Streaming path ──────────────────────────────────────────────────────
+    # Look up this user's provider keys (BYOK)
+    user_keys = await get_user_provider_keys(api_key.user_id)
+
     if request.stream:
         return StreamingResponse(
-            _stream_and_log(model, messages, api_key.id),
+            _stream_and_log(model, messages, api_key.id, user_keys),
             media_type="text/event-stream",
         )
 
-    # ── Non-streaming path ──────────────────────────────────────────────────
     provider_name = "unknown"
     fallback_used = False
     result: dict | None = None
     status = "error"
     t0 = time.monotonic()
     try:
-        provider_name, result, fallback_used = await router.chat_completion(model, messages)
+        provider_name, result, fallback_used = await router.chat_completion(model, messages, user_keys=user_keys)
         status = "success"
     finally:
         latency_ms = int((time.monotonic() - t0) * 1000)

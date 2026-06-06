@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.engine import Base
@@ -38,7 +38,21 @@ class RequestLog(Base):
     fallback_used: Mapped[bool] = mapped_column(Boolean, default=False)
 
     __table_args__ = (
-        # Composite index: covers the "logs for a specific key, newest first"
-        # query pattern in one index scan instead of two separate lookups.
         Index("ix_request_logs_api_key_timestamp", "api_key_id", "timestamp"),
+    )
+
+
+class ProviderKey(Base):
+    """Encrypted storage for users' own Gemini / Groq API keys (BYOK model)."""
+    __tablename__ = "provider_keys"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(50), nullable=False)   # "gemini" | "groq"
+    encrypted_key: Mapped[str] = mapped_column(String(2000), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "provider", name="uq_provider_keys_user_provider"),
     )

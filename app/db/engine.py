@@ -88,6 +88,20 @@ async def create_tables() -> None:
         await conn.execute(text(
             "ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS user_id TEXT"
         ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS provider_keys (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                provider VARCHAR(50) NOT NULL,
+                encrypted_key TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                UNIQUE (user_id, provider)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_provider_keys_user_id ON provider_keys (user_id)"
+        ))
 
         # Indexes — IF NOT EXISTS makes these safe to run on every startup.
         for ddl in [

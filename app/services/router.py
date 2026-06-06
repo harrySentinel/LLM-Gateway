@@ -53,7 +53,7 @@ def _candidates(model: str) -> list[tuple[str, object, str]]:
 
 # ── Non-streaming failover ───────────────────────────────────────────────────
 
-async def chat_completion(model: str, messages: list[dict]) -> tuple[str, dict, bool]:
+async def chat_completion(model: str, messages: list[dict], user_keys: dict | None = None) -> tuple[str, dict, bool]:
     """
     Returns (actual_provider_name, result_dict, fallback_used).
     Retries with exponential backoff on 502/504. Switches provider each attempt.
@@ -76,7 +76,7 @@ async def chat_completion(model: str, messages: list[dict]) -> tuple[str, dict, 
                     "Provider '%s' failed — failing over to '%s'",
                     providers[0][0], name,
                 )
-            result = await provider.chat_completion(use_model, messages)
+            result = await provider.chat_completion(use_model, messages, user_key=(user_keys or {}).get(name))
             final_idx = i
 
     return providers[final_idx][0], result, final_idx > 0
@@ -89,6 +89,7 @@ async def _peek_stream(
     model: str,
     messages: list[dict],
     usage_out: dict,
+    user_key: str | None = None,
 ) -> tuple[bytes, object]:
     """
     Opens the provider stream and awaits exactly ONE chunk.
@@ -102,7 +103,7 @@ async def _peek_stream(
     not attempted: there is no clean way to tell the client "ignore those
     bytes, start over from a different provider."
     """
-    gen = provider.stream_chat(model, messages, usage_out)
+    gen = provider.stream_chat(model, messages, usage_out, user_key=user_key)
     first_chunk = await gen.__anext__()
     return first_chunk, gen
 
@@ -112,6 +113,7 @@ async def stream_chat(
     messages: list[dict],
     usage_out: dict,
     meta_out: dict,
+    user_keys: dict | None = None,
 ):
     """
     Async generator — yields SSE bytes with pre-stream failover.
@@ -139,7 +141,7 @@ async def stream_chat(
                     "Provider '%s' failed before first token — failing over to '%s'",
                     providers[0][0], name,
                 )
-            first_chunk, gen = await _peek_stream(provider, use_model, messages, usage_out)
+            first_chunk, gen = await _peek_stream(provider, use_model, messages, usage_out, (user_keys or {}).get(name))
             final_idx = i
 
     meta_out["provider"] = providers[final_idx][0]

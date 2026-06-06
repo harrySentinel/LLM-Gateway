@@ -9,18 +9,21 @@ from app.services import http_client
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
 
-def _api_key() -> str:
-    key = os.environ.get("GROQ_API_KEY")
+def _api_key(user_key: str | None = None) -> str:
+    key = user_key or os.environ.get("GROQ_API_KEY", "")
     if not key:
-        raise HTTPException(status_code=500, detail="GROQ_API_KEY is not set")
+        raise HTTPException(
+            status_code=400,
+            detail="Groq API key not configured. Add it in Provider Keys.",
+        )
     return key
 
 
-async def chat_completion(model: str, messages: list[dict]) -> dict:
+async def chat_completion(model: str, messages: list[dict], user_key: str | None = None) -> dict:
     try:
         resp = await http_client.get().post(
             f"{GROQ_BASE_URL}/chat/completions",
-            headers={"Authorization": f"Bearer {_api_key()}"},
+            headers={"Authorization": f"Bearer {_api_key(user_key)}"},
             json={"model": model, "messages": messages},
         )
     except httpx.TimeoutException:
@@ -36,7 +39,7 @@ async def chat_completion(model: str, messages: list[dict]) -> dict:
     return resp.json()
 
 
-async def stream_chat(model: str, messages: list[dict], usage_out: dict):
+async def stream_chat(model: str, messages: list[dict], usage_out: dict, user_key: str | None = None):
     """
     Async generator — yields raw SSE bytes for StreamingResponse.
     Populates usage_out with prompt_tokens / completion_tokens from the
@@ -52,7 +55,7 @@ async def stream_chat(model: str, messages: list[dict], usage_out: dict):
         async with http_client.get().stream(
             "POST",
             f"{GROQ_BASE_URL}/chat/completions",
-            headers={"Authorization": f"Bearer {_api_key()}"},
+            headers={"Authorization": f"Bearer {_api_key(user_key)}"},
             json=payload,
         ) as resp:
             if resp.status_code != 200:
