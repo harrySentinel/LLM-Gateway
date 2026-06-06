@@ -1,20 +1,15 @@
 import os
 
-import jwt
 from fastapi import Header, HTTPException
 from sqlalchemy import select
 
 from app.db.engine import get_session
 from app.db.models import ApiKey
 from app.services.auth import hash_key
+from app.services.http_client import get
 
 
 async def require_api_key(authorization: str = Header(...)) -> ApiKey:
-    """
-    FastAPI dependency — inject with `Depends(require_api_key)`.
-    Extracts the Bearer token, hashes it, and looks it up in the DB.
-    Returns the ApiKey row on success; raises 401 on any failure.
-    """
     if not authorization.startswith("Bearer "):
         raise HTTPException(
             status_code=401,
@@ -40,36 +35,36 @@ async def require_api_key(authorization: str = Header(...)) -> ApiKey:
     return api_key
 
 
-def require_user(authorization: str = Header(...)) -> str:
+async def require_user(authorization: str = Header(...)) -> str:
     """
-    FastAPI dependency for dashboard routes — inject with `Depends(require_user)`.
-    Validates the Supabase JWT locally using PyJWT (no network call).
-    Returns the user's UUID string on success; raises 401 on any failure.
+    Validates the Supabase access token by calling /auth/v1/user.
+    Avoids local JWT verification — no secret needed, always authoritative.
     """
     if not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Authorization header must be: Bearer <supabase_token>")
+        raise HTTPException(status_code=401, detail="Authorization header must be: Bearer <token>")
 
     token = authorization[7:]
-    secret = os.environ.get("SUPABASE_JWT_SECRET", "")
-    if not secret:
-        raise HTTPException(status_code=500, detail="SUPABASE_JWT_SECRET not configured")
+    supabase_url = os.environ.get("SUPABASE_URL", "").strip()
+    supabase_key = os.environ.get("SUPABASE_ANON_KEY", "").replace(" ", "").replace("\n", "")
+
+    if not supabase_url or not supabase_key:
+        raise HTTPException(status_code=500, detail="Supabase not configured on the server")
 
     try:
-        payload = jwt.decode(
-            token,
-            secret,
-            algorithms=["HS256"],
-            options={"verify_aud": False},
+        resp = await get().get(
+            f"{supabase_url}/auth/v1/user",
+            headers={
+                "apikey": supabase_key,
+                "Authorization": f"Bearer {token}",
+            },
         )
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Session expired")
-    except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+    except Exception:
+        raise HTTPException(status_code=503, detail="Auth service unreachable")
 
-    if payload.get("role") != "authenticated":
-        raise HTTPException(status_code=401, detail="Not an authenticated user token")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=401, detail="Invalid or expired session")
 
-    user_id: str | None = payload.get("sub")
+    user_id: str | None = resp.json().get("id")
     if not user_id:
         raise HTTPException(status_code=401, detail="Token missing user ID")
 
